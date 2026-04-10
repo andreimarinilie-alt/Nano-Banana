@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="ro">
+<head>
+    <meta charset="UTF-8">
+    <title>Monkey Brawl 🐒</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #073b31; font-family: 'Segoe UI', Arial, sans-serif; user-select: none; }
+        canvas { display: block; cursor: crosshair; }
+        
+        #menu { 
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%; 
+            background: radial-gradient(circle, #0a4d41, #000); 
+            display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 100; 
+        }
+        
+        .brawler-list { display: flex; gap: 15px; margin-top: 30px; flex-wrap: wrap; justify-content: center; }
+        
+        .card { 
+            background: #1e90ff; padding: 20px; border-radius: 20px; border: 4px solid white; 
+            text-align: center; cursor: pointer; transition: 0.2s; width: 130px; color: white; 
+            box-shadow: 0 8px 15px rgba(0,0,0,0.3);
+        }
+        .card:hover { transform: translateY(-5px); background: #f1c40f; }
+        .card * { pointer-events: none; }
+
+        #ui { position: fixed; top: 20px; left: 20px; color: white; display: none; pointer-events: none; z-index: 10; }
+        .bar-bg { width: 220px; height: 20px; background: rgba(0,0,0,0.6); border: 2px solid white; border-radius: 10px; margin: 5px 0; overflow: hidden; }
+        #hp-bar { width: 100%; height: 100%; background: #ff4757; transition: width 0.1s; }
+        #super-bar { width: 0%; height: 100%; background: #f1c40f; }
+
+        #pause-menu {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.85); display: none; flex-direction: column;
+            align-items: center; justify-content: center; z-index: 200;
+        }
+        .pause-btn {
+            background: #f1c40f; color: black; padding: 15px 40px; font-size: 20px;
+            font-weight: bold; border: none; border-radius: 10px; cursor: pointer; margin: 10px;
+            width: 250px;
+        }
+        .pause-btn:hover { background: white; }
+    </style>
+</head>
+<body>
+
+    <div id="menu">
+        <h1 style="color: white; font-size: 60px; text-shadow: 4px 4px #000; margin-bottom: 5px;">MONKEY BRAWL</h1>
+        <p style="color: #ccc;">Selectează un luptător:</p>
+        <div class="brawler-list">
+            <div class="card" style="background: #27ae60;" onclick="initGame('classic')">
+                <div style="font-size: 50px;">🐒</div><h3>MAIMUȚĂ</h3><p>HP: 130</p>
+            </div>
+            <div class="card" style="background: #2980b9;" onclick="initGame('ninja')">
+                <div style="font-size: 50px;">👤</div><h3>NINJA</h3><p>HP: 130</p>
+            </div>
+            <div class="card" style="background: #e74c3c;" onclick="initGame('gorilla')">
+                <div style="font-size: 50px;">🦍</div><h3>GORILĂ</h3><p>HP: 135</p>
+            </div>
+        </div>
+    </div>
+
+    <div id="pause-menu">
+        <h1 style="color: white; font-size: 40px;">PAUZĂ</h1>
+        <button class="pause-btn" onclick="togglePause()">REIA</button>
+        <button class="pause-btn" onclick="returnToHome()" style="background: #e74c3c; color: white;">HOME SCREEN</button>
+    </div>
+
+    <div id="ui">
+        <div id="score-display" style="font-size: 30px; color: #f1c40f; text-shadow: 2px 2px #000;">SCOR: 0</div>
+        <div id="ammo-display" style="font-size: 18px; color: #fff;">Gloanțe extra: 0</div>
+        <div style="margin-top:10px;">HP</div>
+        <div class="bar-bg"><div id="hp-bar"></div></div>
+        <div>SUPER (SPACE)</div>
+        <div class="bar-bg"><div id="super-bar"></div></div>
+    </div>
+
+    <canvas id="gameCanvas"></canvas>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const menu = document.getElementById('menu');
+        const ui = document.getElementById('ui');
+        const pauseMenu = document.getElementById('pause-menu');
+
+        let active = false, isPaused = false, score = 0, superCharge = 0;
+        let p, enemies = [], bullets = [], bushes = [], drops = [], keys = {};
+
+        const REGEN_RATE = 1 / 60; 
+
+        const brawlerStats = {
+            classic: { e: "🐒", hp: 130, s: 5.5, sCol: "#2ecc71" },
+            ninja: { e: "👤", hp: 130, s: 7.5, sCol: "#3498db" },
+            gorilla: { e: "🦍", hp: 135, s: 4.5, sCol: "#f39c12" }
+        };
+
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+
+        for(let i=0; i<15; i++) {
+            bushes.push({ x: Math.random()*canvas.width, y: Math.random()*canvas.height, s: 60 });
+        }
+
+        function initGame(type) {
+            const stats = brawlerStats[type];
+            p = {
+                x: canvas.width/2, y: canvas.height/2,
+                hp: stats.hp, max: stats.hp,
+                speed: stats.s, emoji: stats.e,
+                superCol: stats.sCol, hidden: false, r: 25,
+                extraAmmo: 0
+            };
+            score = 0; superCharge = 0; enemies = []; bullets = []; drops = []; keys = {};
+            menu.style.display = 'none'; ui.style.display = 'block'; pauseMenu.style.display = 'none';
+            isPaused = false; active = true;
+        }
+
+        function togglePause() {
+            if (!active) return;
+            isPaused = !isPaused;
+            pauseMenu.style.display = isPaused ? 'flex' : 'none';
+        }
+
+        function returnToHome() {
+            active = false; isPaused = false;
+            pauseMenu.style.display = 'none'; ui.style.display = 'none'; menu.style.display = 'flex';
+        }
+
+        window.onkeydown = e => {
+            if (e.key === "Escape") togglePause();
+            keys[e.key.toLowerCase()] = true;
+            if (e.code === "Space" && superCharge >= 100 && active && !isPaused) triggerSuper();
+        };
+        window.onkeyup = e => keys[e.key.toLowerCase()] = false;
+        
+        window.onmousedown = e => {
+            if(!active || isPaused) return;
+            const angle = Math.atan2(e.clientY - p.y, e.clientX - p.x);
+            
+            // Trage glonțul principal
+            bullets.push({ x: p.x, y: p.y, vx: Math.cos(angle)*15, vy: Math.sin(angle)*15, r: 5, c: 'white' });
+            
+            // Dacă are gloanțe extra de la banane, trage încă unul la un unghi mic
+            if(p.extraAmmo > 0) {
+                bullets.push({ x: p.x, y: p.y, vx: Math.cos(angle + 0.2)*15, vy: Math.sin(angle + 0.2)*15, r: 5, c: '#f1c40f' });
+                p.extraAmmo--;
+            }
+        };
+
+        function triggerSuper() {
+            superCharge = 0;
+            for(let i=0; i<16; i++) {
+                const a = (Math.PI*2/16)*i;
+                bullets.push({ x: p.x, y: p.y, vx: Math.cos(a)*10, vy: Math.sin(a)*10, r: 10, c: p.superCol });
+            }
+        }
+
+        function update() {
+            if(!active || isPaused) return;
+
+            if(keys['w']) p.y -= p.speed;
+            if(keys['s']) p.y += p.speed;
+            if(keys['a']) p.x -= p.speed;
+            if(keys['d']) p.x += p.speed;
+
+            if (p.x < p.r) p.x = p.r;
+            if (p.x > canvas.width - p.r) p.x = canvas.width - p.r;
+            if (p.y < p.r) p.y = p.r;
+            if (p.y > canvas.height - p.r) p.y = canvas.height - p.r;
+
+            if (p.hp < p.max) {
+                p.hp += REGEN_RATE;
+                if (p.hp > p.max) p.hp = p.max;
+            }
+
+            p.hidden = false;
+            bushes.forEach(b => {
+                if(p.x > b.x && p.x < b.x + b.s && p.y > b.y && p.y < b.y + b.s) p.hidden = true;
+            });
+
+            if(Math.random() < 0.02 && enemies.length < 10) {
+                const enemyTypes = ["👽", "👳"];
+                const chosenType = enemyTypes[Math.floor(Math.random() * enemyTypes.length)];
+                enemies.push({ x: Math.random()*canvas.width, y: -30, hp: 30, type: chosenType });
+            }
+
+            enemies.forEach((en, i) => {
+                if(!p.hidden) {
+                    const ang = Math.atan2(p.y - en.y, p.x - en.x);
+                    en.x += Math.cos(ang) * 2.5; en.y += Math.sin(ang) * 2.5;
+                } else { en.y += 1.5; }
+
+                if(Math.hypot(p.x - en.x, p.y - en.y) < 40 && !p.hidden) {
+                    p.hp -= 0.6;
+                    if(p.hp <= 0) { alert("GAME OVER!"); returnToHome(); }
+                }
+            });
+
+            // Logica Banane (Drops)
+            drops.forEach((d, di) => {
+                if(Math.hypot(p.x - d.x, p.y - d.y) < 30) {
+                    p.extraAmmo++;
+                    drops.splice(di, 1);
+                }
+            });
+
+            bullets.forEach((b, bi) => {
+                b.x += b.vx; b.y += b.vy;
+                enemies.forEach((en, ei) => {
+                    if(Math.hypot(b.x - en.x, b.y - en.y) < 30) {
+                        en.hp -= 10;
+                        bullets.splice(bi, 1);
+                        superCharge = Math.min(100, superCharge + 5);
+                        if(en.hp <= 0) { 
+                            // 40% Șansă de Drop Banană
+                            if(Math.random() < 0.4) {
+                                drops.push({x: en.x, y: en.y});
+                            }
+                            enemies.splice(ei, 1); 
+                            score += 20; 
+                        }
+                    }
+                });
+            });
+
+            document.getElementById('hp-bar').style.width = (p.hp/p.max*100) + "%";
+            document.getElementById('super-bar').style.width = superCharge + "%";
+            document.getElementById('score-display').innerText = "SCOR: " + score;
+            document.getElementById('ammo-display').innerText = "Gloanțe extra: " + p.extraAmmo;
+        }
+
+        function animate() {
+            ctx.fillStyle = "#073b31";
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = "rgba(46, 204, 113, 0.4)";
+            bushes.forEach(b => ctx.fillRect(b.x, b.y, b.s, b.s));
+
+            if(active) {
+                // Desenează Bananele de pe jos
+                ctx.font = "25px Arial";
+                drops.forEach(d => ctx.fillText("🍌", d.x, d.y));
+
+                ctx.save();
+                if(p.hidden) ctx.globalAlpha = 0.4;
+                ctx.font = "45px Arial"; ctx.textAlign = "center";
+                ctx.fillText(p.emoji, p.x, p.y + 15); 
+                ctx.restore();
+
+                ctx.font = "35px Arial";
+                enemies.forEach(en => ctx.fillText(en.type, en.x, en.y + 12));
+
+                bullets.forEach(b => {
+                    ctx.fillStyle = b.c;
+                    ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, Math.PI*2); ctx.fill();
+                });
+                update();
+            }
+            requestAnimationFrame(animate);
+        }
+        animate();
+    </script>
+</body>
+</html>
